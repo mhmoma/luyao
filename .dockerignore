@@ -1,0 +1,10 @@
+.git
+.venv
+**pycache**/
+_.pyc
+_.pyo
+\*.pyd
+.DS_Store
+.vscode/
+.env
+uploads/
