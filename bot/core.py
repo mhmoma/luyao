@@ -3,7 +3,6 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from settings import config
 from ai.client import get_chat_completion, get_chat_completion_with_image, download_image, get_image_tags_from_comfyui
-from seaturtle.game import SeaTurtleGame, GameStatus
 from bot.data_manager import data_manager
 from urllib.parse import urlparse
 import os
@@ -35,7 +34,6 @@ class SassySisterBot(commands.Bot):
         # --- 其他个东西 ---
         self.persona = self._load_persona()
         self._ensure_temp_dir()
-        self.game_sessions = {}  # 我们的游戏大厅
         self.proactive_chat_enabled = data_manager.get_setting("proactive_chat_enabled", True)
         self.artwork_forwarding_enabled = data_manager.get_setting("artwork_forwarding_enabled", True)
         # --- 六一儿童节活动 ---
@@ -68,7 +66,6 @@ class SassySisterBot(commands.Bot):
         """初始化钩子，加载 cogs 并同步命令"""
         print("正在加载 cogs...")
         await self.load_extension("bot.drawing")
-        await self.load_extension("bot.music")
         print("正在同步斜杠命令...")
         await self.tree.sync()
         print("命令已同步。")
@@ -188,10 +185,6 @@ class SassySisterBot(commands.Bot):
         print("1. @我聊天：直接@我，跟我讲讲你的心里话。要是敢发点刺激的图，姐姐我可能会让你看到我的另一面哦……")
         print("2. /imagine: 使用文生图功能，让姐姐我帮你画点好东西。")
         print("3. 智能插嘴：我会在群里潜水，看你们聊天。要是看到感兴趣的话题，我说不定会突然插嘴，给你们来点刺激的。")
-        print("4. 海龟汤游戏：想玩点动脑子的小游戏呀？试试看对我说：")
-        print("   - `!海龟汤 开局 \"汤面\" \"汤底\"`")
-        print("   - `!海龟汤 猜 \"你的猜测\"`")
-        print("   - `!海龟汤 结束`")
         print("------")
 
     def _generate_welcome_message(self, member: discord.Member) -> str:
@@ -433,10 +426,6 @@ class SassySisterBot(commands.Bot):
             await message.channel.send("小阿弟，我只听白衣胜雪的哦。")
             return
 
-        if message.content.startswith("!海龟汤"):
-            await self._handle_seaturtle_command(message)
-            return
-
         history = [msg async for msg in message.channel.history(limit=2)]
         if len(history) > 1 and history[1].author == self.user:
             return
@@ -481,62 +470,6 @@ class SassySisterBot(commands.Bot):
 
             if response:
                 await message.channel.send(response)
-
-    async def _handle_seaturtle_command(self, message):
-        """处理所有跟海龟汤相关个指令"""
-        try:
-            parts = shlex.split(message.content)
-        except ValueError:
-            await message.channel.send("哎哟，你这个指令格式有点问题呀，姐姐我看不懂。")
-            return
-            
-        command = parts[1] if len(parts) > 1 else None
-        channel_id = message.channel.id
-
-        if command == "开局":
-            if channel_id in self.game_sessions and self.game_sessions[channel_id].status != GameStatus.GAME_OVER:
-                await message.channel.send("这个频道已经有一局游戏勒进行哉，覅急呀。")
-                return
-            if len(parts) < 4:
-                await message.channel.send("开局指令不对哦，小阿弟。要像这个样子：`!海龟汤 开局 \"汤面\" \"汤底\"`")
-                return
-            
-            soup, answer = parts[2], parts[3]
-            game = SeaTurtleGame(soup, answer, message.author.id)
-            self.game_sessions[channel_id] = game
-            response = game.start_game()
-            await message.channel.send(response)
-
-        elif command == "猜":
-            if len(parts) < 3:
-                await message.channel.send("你猜个是啥个呀？要告诉姐姐我呀。格式是：`!海龟汤 猜 \"你的猜测\"`")
-                return
-            
-            guess = parts[2]
-            result = game.make_guess(message.author.id, guess)
-            if result:
-                await message.channel.send(result)
-            else:
-                async with message.channel.typing():
-                    ai_prompt = f"我正在玩海龟汤游戏。汤面是“{game.soup}”，汤底是“{game.answer}”。现在有人猜：“{guess}”。请根据汤底，只回答“是”、“否”或“无关”。"
-                    ai_persona = "你是一个严谨的海龟汤裁判，你的任务是根据汤底，对玩家的提问只回答“是”、“否”或“无关”，不要有任何多余的解释和情感。"
-                    response = await get_chat_completion(ai_prompt, ai_persona)
-                    await message.channel.send(f"对于“{guess}”，姐姐我的回答是：**{response}**")
-
-        elif command == "结束":
-            game = self.game_sessions.get(channel_id)
-            if not game or game.status == GameStatus.GAME_OVER:
-                await message.channel.send("现在没有游戏勒进行当中呀。")
-                return
-            if message.author.id != game.owner_id:
-                await message.channel.send("这局游戏不是你开个呀，你不能帮人家结束哦。")
-                return
-            
-            response = game.end_game()
-            await message.channel.send(response)
-        
-        else:
-            await message.channel.send("小阿弟，你想玩海龟汤呀？指令是：`!海龟汤 开局 \"汤面\" \"汤底\"`，`!海龟汤 猜 \"你的猜测\"`，`!海龟汤 结束`")
 
     async def _handle_reverse_prompt_command(self, message):
         """处理反推指令"""

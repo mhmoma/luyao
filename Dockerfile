@@ -14,4 +14,4 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 在容器启动时设置DNS，然后运行机器人
-CMD sh -c "echo 'nameserver 8.8.8.8' > /etc/resolv.conf && python main.py"
+CMD ["python", "main.py"]

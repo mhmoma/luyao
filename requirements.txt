@@ -3,7 +3,4 @@ python-dotenv
 openai
 httpx
 aiofiles
-Flask
 websockets
-yt-dlp
-PyNaCl
