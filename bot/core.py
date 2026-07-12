@@ -191,7 +191,23 @@ class SassySisterBot(commands.Bot):
         print("────────────────────────────────────────")
         print("  管理员指令  赶紧睡吧 / 该起来了")
         print("              关闭自动转图 / 开启自动转图")
+        print("              状态")
         print("════════════════════════════════════════")
+
+    def _format_runtime_status(self) -> str:
+        return (
+            f"潜水插话={'开启' if self.proactive_chat_enabled else '关闭'}"
+            f"({self.proactive_chat_probability * 100:.0f}%) · "
+            f"自动转图={'开启' if self.artwork_forwarding_enabled else '关闭'}"
+        )
+
+    def _print_runtime_status(self):
+        print(f"[璐瑶] 当前状态 | {self._format_runtime_status()}")
+
+    def _log_switch_change(self, name: str, enabled: bool, operator: discord.abc.User):
+        state = "开启" if enabled else "关闭"
+        print(f"[璐瑶] 开关切换 | {name} → {state} | 操作者: {operator} ({operator.id})")
+        self._print_runtime_status()
 
     def _generate_welcome_message(self, member: discord.Member) -> str:
         """生成欢迎新成员的介绍信息。"""
@@ -333,22 +349,31 @@ class SassySisterBot(commands.Bot):
             if message.content == "赶紧睡吧":
                 self.proactive_chat_enabled = False
                 await data_manager.set_setting("proactive_chat_enabled", False)
+                self._log_switch_change("潜水插话", False, message.author)
                 await message.channel.send("知道了。我不插嘴了。")
                 return
             elif message.content == "该起来了":
                 self.proactive_chat_enabled = True
                 await data_manager.set_setting("proactive_chat_enabled", True)
+                self._log_switch_change("潜水插话", True, message.author)
                 await message.channel.send("嗯，醒了。")
                 return
             elif message.content in ["关闭自动转图", "待机"]:
                 self.artwork_forwarding_enabled = False
                 await data_manager.set_setting("artwork_forwarding_enabled", False)
+                self._log_switch_change("自动转图", False, message.author)
                 await message.channel.send("好，不转图了。")
                 return
             elif message.content == "开启自动转图":
                 self.artwork_forwarding_enabled = True
                 await data_manager.set_setting("artwork_forwarding_enabled", True)
+                self._log_switch_change("自动转图", True, message.author)
                 await message.channel.send("转图开了。")
+                return
+            elif message.content == "状态":
+                status_text = self._format_runtime_status()
+                print(f"[璐瑶] 状态查询 | {status_text} | 操作者: {message.author} ({message.author.id})")
+                await message.channel.send(f"当前：{status_text}")
                 return
             elif message.content.startswith("!reload"):
                 parts = message.content.split()
@@ -401,7 +426,8 @@ class SassySisterBot(commands.Bot):
                 return
         
         # 5. 其他指令和互动
-        if message.content in ["赶紧睡吧", "该起来了", "关闭自动转图", "开启自动转图"] and (not config.ADMIN_USER_ID or str(message.author.id) != config.ADMIN_USER_ID):
+        if message.content in ["赶紧睡吧", "该起来了", "关闭自动转图", "开启自动转图", "状态", "待机"] and (not config.ADMIN_USER_ID or str(message.author.id) != config.ADMIN_USER_ID):
+            print(f"[璐瑶] 开关操作被拒绝 | {message.author} ({message.author.id}) 尝试: {message.content}")
             await message.channel.send("我只听白衣胜雪的。")
             return
 
