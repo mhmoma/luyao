@@ -73,8 +73,7 @@ DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
 # 你的 OpenAI API 密钥
 OPENAI_API_KEY="YOUR_OPENAI_API_KEY"
 
-# 其他可能需要的配置
-XIAOHA_USER_ID=1444308541388361769
+# 其他可能需要的配置...
 ```
 
 **注意**: `.env` 文件包含敏感信息，已在 `.gitignore` 中配置，不会被上传到 Git 仓库。请务必在服务器上手动创建和配置此文件。
