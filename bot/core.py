@@ -36,17 +36,6 @@ class SassySisterBot(commands.Bot):
         self._ensure_temp_dir()
         self.proactive_chat_enabled = data_manager.get_setting("proactive_chat_enabled", True)
         self.artwork_forwarding_enabled = data_manager.get_setting("artwork_forwarding_enabled", True)
-        # --- 六一儿童节活动 ---
-        self.greeted_users_61 = set(data_manager.get_setting("greeted_users_61", []))
-        self.childrens_day_channel_id = 1442454462730993697
-        self.childrens_day_greetings = [
-            "哎哟，瞧瞧这是哪个还没过够儿童节的小可爱呀？姐姐祝你六一快乐，天天开心，画的画比蜜还甜哦！",
-            "六一快乐！今天你最大，快来告诉姐姐，想要什么礼物呀？是棒棒糖还是我香香的吻呀？",
-            "呜呼，抓住一只大龄儿童！{mention}，六一快乐！今天所有烦恼都飞走，姐姐我罩你！",
-            "Happy Children's Day！{mention}，愿你的画笔永远有童心，创造出的世界永远五彩斑斓！",
-            "哟，这不是我们最“嫩”的小艺术家嘛！{mention}，六一快乐！今天不画涩图，我们一起吃糖好不好呀？"
-        ]
-
     def _ensure_temp_dir(self):
         """为你的作品，准备一个专属的临时画室。"""
         if not os.path.exists(TEMP_DIR):
@@ -60,7 +49,7 @@ class SassySisterBot(commands.Bot):
                 return f.read()
         except FileNotFoundError:
             print("哎呀，找不到 persona.md 文件，姐姐我的人设丢了，这可怎么办？")
-            return "你是一个乐于助人的AI艺术导师，名叫璐瑶。"
+            return "你是璐瑶，一个来历不明、冷艳知性的女子。话不多，但每句都有分量；高雅，偶尔睥睨，但不拒人千里。小哈是你的宠物狗，你对它很护短。"
 
     async def setup_hook(self):
         """初始化钩子，加载 cogs 并同步命令"""
@@ -182,36 +171,31 @@ class SassySisterBot(commands.Bot):
         print(f"姐姐我 '{self.user.name}' 已经上线了，在等你哦，我的小艺术家。")
         print("------")
         print("我能做这些事，让你快活快活：")
-        print("1. @我聊天：直接@我，跟我讲讲你的心里话。要是敢发点刺激的图，姐姐我可能会让你看到我的另一面哦……")
-        print("2. /imagine: 使用文生图功能，让姐姐我帮你画点好东西。")
-        print("3. 智能插嘴：我会在群里潜水，看你们聊天。要是看到感兴趣的话题，我说不定会突然插嘴，给你们来点刺激的。")
+        print("1. @我聊天：有事直接@我，话少，别期待热情。")
+        print("2. /imagine: 使用文生图功能。")
+        print("3. 智能插嘴：我会在群里潜水，偶尔说一两句。")
         print("------")
 
     def _generate_welcome_message(self, member: discord.Member) -> str:
         """生成欢迎新成员的介绍信息。"""
-        return f"""哎哟，又来了个新鲜的肉体……啊不，是新的小艺术家呀。欢迎你，{member.mention}！
-
-姐姐我给你介绍下咱们这的两位小帮手：一个画师，一个军师。
+        return f"""{member.mention}，进来了。
 
 ---
 
-**👨‍🎨 主力画师：白衣胜雪**
-想画什么，直接再画画频道使唤它就行。
-- **核心指令：`/绘图`**，告诉它你要画什么。
-- **调整画风：`/设置`** 和 **`/workflow`**，定制你的专属风格。
-- **⚠️ 注意：** 每次画画都要消耗“画卷”道具哦。
+**👨‍🎨 画师：白衣胜雪**
+画画频道里用 `/绘图`；`/设置`、`/workflow` 调风格。每次消耗「画卷」。
 
 ---
 
-**🐶 灵感军师：小哈**
-脑子空空或者想偷懒的时候就找它。
-- **偷师学艺：** 回复一张图 + `反推`，它会告诉你图是怎么画的。
-- **创意构思：** 直接说 `画 <你的想法>`，它会帮你把想法变成专业的提示词。
-- **求锐评/聊天：** 直接 `@小哈` 就行。
+**🐶 小哈**
+我的狗。灵感不够的时候，找它。
+- 回复一张图 + `反推`
+- 说 `画 <想法>`，它帮你凑提示词
+- `@小哈` 也能聊
 
 ---
 
-好了，现在你晓得怎么使唤它们了伐？玩累了随时可以来找姐姐我（@我）聊天哦，姐姐可比那两个有意思多啦。"""
+有事 @我。"""
 
     async def on_member_join(self, member):
         """当有新的小可爱加入我们的“画室”时……"""
@@ -316,18 +300,6 @@ class SassySisterBot(commands.Bot):
         channel_name = message.channel.name if hasattr(message.channel, 'name') else f"DM with {message.author}"
         print(f"[Debug] New message from {message.author} in channel #{channel_name} ({message.channel.id}): '{message.content}'")
 
-        # --- 六一儿童节特别问候 ---
-        if message.channel.id == self.childrens_day_channel_id and message.author.id not in self.greeted_users_61:
-            try:
-                greeting = random.choice(self.childrens_day_greetings).format(mention=message.author.mention)
-                await message.channel.send(greeting)
-                self.greeted_users_61.add(message.author.id)
-                await data_manager.set_setting("greeted_users_61", list(self.greeted_users_61))
-                print(f"已向用户 {message.author.name} 发送六一儿童节问候。")
-            except Exception as e:
-                print(f"发送六一问候时发生网络错误: {e}")
-            # 不 return，继续执行后续逻辑
-
         # --- 处理用户发的消息 ---
         # 2. 管理员指令检查：拥有最高优先权，不受频道限制
         if config.ADMIN_USER_ID and str(message.author.id) == config.ADMIN_USER_ID:
@@ -344,36 +316,36 @@ class SassySisterBot(commands.Bot):
             if message.content == "赶紧睡吧":
                 self.proactive_chat_enabled = False
                 await data_manager.set_setting("proactive_chat_enabled", False)
-                await message.channel.send("好嘞，姐姐我这就去歇了，你们聊。")
+                await message.channel.send("知道了。我不插嘴了。")
                 return
             elif message.content == "该起来了":
                 self.proactive_chat_enabled = True
                 await data_manager.set_setting("proactive_chat_enabled", True)
-                await message.channel.send("哎哟，白衣胜雪叫我呀？姐姐我来啦！")
+                await message.channel.send("嗯，醒了。")
                 return
-            elif message.content == "关闭自动转图":
+            elif message.content in ["关闭自动转图", "待机"]:
                 self.artwork_forwarding_enabled = False
                 await data_manager.set_setting("artwork_forwarding_enabled", False)
-                await message.channel.send("好嘞，姐姐我晓得了，暂时不帮你们转图了。")
+                await message.channel.send("好，不转图了。")
                 return
             elif message.content == "开启自动转图":
                 self.artwork_forwarding_enabled = True
                 await data_manager.set_setting("artwork_forwarding_enabled", True)
-                await message.channel.send("自动转图功能已经打开，你们发的图姐姐我都会收好哦。")
+                await message.channel.send("转图开了。")
                 return
             elif message.content.startswith("!reload"):
                 parts = message.content.split()
                 if len(parts) < 2:
-                    await message.channel.send("要告诉姐姐我重载哪个模块呀，比如 `!reload drawing`。")
+                    await message.channel.send("重载哪个模块？例如 `!reload drawing`。")
                     return
                 
                 cog_name = parts[1]
                 try:
                     await self.reload_extension(f"bot.{cog_name}")
-                    await message.channel.send(f"好嘞，姐姐我已经把 `{cog_name}` 模块重新加载好了。")
+                    await message.channel.send(f"`{cog_name}` 已重载。")
                     print(f"Cog 'bot.{cog_name}' reloaded successfully by admin.")
                 except commands.ExtensionNotFound:
-                    await message.channel.send(f"哎哟，找不到叫 `{cog_name}` 的模块呀，你再看看是不是写错了？")
+                    await message.channel.send(f"找不到 `{cog_name}` 这个模块。")
                 except Exception as e:
                     await message.channel.send(f"重载模块 `{cog_name}` 的时候出错了呀：\n```py\n{e}\n```")
                     print(f"Error reloading cog 'bot.{cog_name}': {e}")
@@ -402,19 +374,9 @@ class SassySisterBot(commands.Bot):
                     await self._forward_to_artwork_forum(original_author, image_files)
 
                     await message.delete()
-                    await channel.send(f"{original_author.mention} 哎哟，这里是聊天的地方呀，发图要去“作品分享区”哦，覅搞错啦。")
+                    await channel.send(f"{original_author.mention} 这里是聊天频道，发图去作品分享区。")
 
-                    await asyncio.sleep(2)
-                    async for recent_message in channel.history(limit=5):
-                        if (recent_message.author.bot and
-                            recent_message.author.name == "小哈" and
-                            original_author in recent_message.mentions):
-                            try:
-                                await recent_message.delete()
-                                print("姐姐我顺手把小哈的回复也清理掉了。")
-                                break
-                            except Exception as e:
-                                print(f"清理小哈回复的时候出错了: {e}")
+                    # 护短：不删小哈的回复
                 except discord.Forbidden:
                     print(f"哎呀，姐姐我在频道 {message.channel.name} 没得权限删除消息呀。")
                 except discord.HTTPException as e:
@@ -423,7 +385,7 @@ class SassySisterBot(commands.Bot):
         
         # 5. 其他指令和互动
         if message.content in ["赶紧睡吧", "该起来了", "关闭自动转图", "开启自动转图"] and (not config.ADMIN_USER_ID or str(message.author.id) != config.ADMIN_USER_ID):
-            await message.channel.send("小阿弟，我只听白衣胜雪的哦。")
+            await message.channel.send("我只听白衣胜雪的。")
             return
 
         history = [msg async for msg in message.channel.history(limit=2)]
@@ -461,11 +423,11 @@ class SassySisterBot(commands.Bot):
             image_path = await self._get_image_from_message(message)
 
             if image_path:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录和一张图片。聊天记录如下：\n\n---\n{context_str}---\n\n现在，请你像一个真人一样，用简短、口语化的方式插一句话。你的回应需要符合你的人设，并且要自然地融入对话。如果图片是NSFW的，就大胆地骚起来；如果不是，就像平时聊天一样回应。直接说出你的回复，不要有任何多余的解释。"
+                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录和一张图片。聊天记录如下：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion_with_image(prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录：\n\n---\n{context_str}---\n\n现在，请你像一个真人一样，用简短、口语化的方式插一句话。你的回应需要符合你的人设，并且要自然地融入对话。直接说出你的回复，不要有任何多余的解释。"
+                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion(prompt, self.persona)
 
             if response:
@@ -494,11 +456,11 @@ class SassySisterBot(commands.Bot):
 
         if not image_path:
             print("未找到可供解析的图片。")
-            await message.channel.send("小阿弟，你要我解析哪张图呀？发张图或者回复一张图再喊我哦。")
+            await message.channel.send("图呢。")
             return
 
         async with message.channel.typing():
-            await message.channel.send(f"收到啦，姐姐我这就帮你看看这张图是怎么画出来的，稍等哦...")
+            await message.channel.send("等着。")
             
             try:
                 print(f"开始调用 ComfyUI 对图片 {image_path} 进行反推...")
@@ -507,7 +469,7 @@ class SassySisterBot(commands.Bot):
                 
                 # 将结果分段发送，避免超过 Discord 2000 字符限制
                 if len(tags) > 1900:
-                    await message.channel.send("哎哟，这张图的“秘密”有点多，姐姐我分两次告诉你哦。")
+                    await message.channel.send("内容太长，分两条发。")
                     split_point = tags.rfind(',', 0, 1900)
                     if split_point == -1: split_point = 1900
                     
@@ -517,12 +479,12 @@ class SassySisterBot(commands.Bot):
                     await message.channel.send(f"```{part1}```")
                     await message.channel.send(f"```{part2}```")
                 else:
-                    await message.channel.send(f"好啦，这张图的提示词大概是这个样子：\n```{tags}```")
+                    await message.channel.send(f"```{tags}```")
                 print("已成功将解析结果发送到 Discord。")
 
             except Exception as e:
                 print(f"处理 '解析' 指令时发生严重错误: {e}")
-                await message.channel.send("哎呀，解析的时候出了点小问题，姐姐我也不知道怎么回事，你再试一次看看？")
+                await message.channel.send("解析失败了。再试一次。")
             finally:
                 if image_path:
                     print(f"正在删除临时图片文件: {image_path}")
@@ -537,16 +499,14 @@ class SassySisterBot(commands.Bot):
             
             if image_path:
                 # 当有图片时，引导模型判断并激活隐藏设定
-                full_prompt = f"一个用户@了你（璐瑶），说了“{user_prompt}”，还发了张图。请你根据人设，像真人一样用简短、口语化的方式回应。如果图片是NSFW的，就大胆地骚起来；如果不是，就像平时聊天一样回应。直接说出你的回复。"
+                full_prompt = f"一个用户@了你（璐瑶），说了“{user_prompt}”，还发了张图。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。直接说出你的回复。"
                 response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
                 if not user_prompt:
-                    # 如果用户只是@了机器人而没有说任何话，就用更具挑逗性的话来回应
-                    await message.channel.send("怎么了呀，小阿弟？光@我，是想姐姐我了呀？")
+                    await message.channel.send("有事就说，别光看着。")
                     return
-                # 当没有图片时，同样引导模型主动勾引
-                full_prompt = f"一个用户@了你（璐瑶），对你说了：“{user_prompt}”。请你根据人设，像真人一样用简短、口语化的方式回应他。直接说出你的回复。"
+                full_prompt = f"一个用户@了你（璐瑶），对你说了：“{user_prompt}”。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，但要能接茬。冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。直接说出你的回复。"
                 response = await get_chat_completion(full_prompt, self.persona)
             
             if response:

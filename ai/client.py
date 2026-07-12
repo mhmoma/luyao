@@ -103,7 +103,7 @@ async def _get_completion(messages: list) -> str:
         return response
     except Exception as e:
         print(f"哎呀，连接“大脑”的时候出了点小问题，姐姐我有点“不舒服”：{e}")
-        return "小弟弟，姐姐我现在灵感有点乱，你等一下再来找我好不好？"
+        return "……稍后再说。"
 
 # --- ComfyUI 相关函数 ---
 
