@@ -28,6 +28,8 @@ services:
       - ADMIN_USER_ID=
       # Luyao's closest person; she shows intimacy and warmth only to this user.
       - TOMKK_USER_ID=
+      # Xiaoha bot user ID — Luyao's pet dog; used to detect Xiaoha in chat context
+      - XIAOHA_USER_ID=
       # Channel IDs where the bot is allowed to respond.
       # Separate multiple IDs with commas, e.g., "123,456"
       - ALLOWED_CHANNEL_IDS=

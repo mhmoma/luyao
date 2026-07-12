@@ -24,6 +24,9 @@ ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
 # Tomkk user ID — Luyao's closest person; special tone only for him
 TOMKK_USER_ID = os.getenv("TOMKK_USER_ID")
 
+# Xiaoha bot user ID — Luyao's pet dog bot
+XIAOHA_USER_ID = os.getenv("XIAOHA_USER_ID")
+
 # Channel IDs for automatic cleanup
 CLEANUP_CHANNEL_IDS = os.getenv("CLEANUP_CHANNEL_IDS")
 

@@ -471,35 +471,85 @@ class SassySisterBot(commands.Bot):
         names = [author.name, getattr(author, "global_name", None), getattr(author, "display_name", None)]
         return any(n and "tomkk" in n.lower() for n in names)
 
+    def _is_xiaoha(self, author: discord.User | discord.Member) -> bool:
+        if config.XIAOHA_USER_ID and str(author.id) == config.XIAOHA_USER_ID:
+            return True
+        names = [author.name, getattr(author, "global_name", None), getattr(author, "display_name", None)]
+        return any(n and ("小哈" in n or "xiaoha" in n.lower()) for n in names)
+
+    def _format_context_line(self, msg: discord.Message) -> str:
+        content = msg.content or "(无文字)"
+        if self._is_xiaoha(msg.author):
+            return f"小哈 [你的狗]: {content}"
+        if msg.author == self.user:
+            return f"璐瑶: {content}"
+        return f"{msg.author.display_name}: {content}"
+
+    async def _build_channel_context(self, message: discord.Message, limit: int = 10) -> tuple[str, bool]:
+        history = [msg async for msg in message.channel.history(limit=limit)]
+        history.reverse()
+        has_xiaoha = any(self._is_xiaoha(msg.author) for msg in history)
+        context_str = "\n".join(self._format_context_line(msg) for msg in history)
+        return context_str, has_xiaoha
+
+    def _xiaoha_context_instruction(self, has_xiaoha: bool) -> str:
+        if not has_xiaoha:
+            return ""
+        return (
+            " 上下文中出现了小哈（你的狗）的发言。不要视而不见——像真的在养狗的主人那样有所反应。"
+            "小哈在捣乱、没礼貌、胡说或调皮时，训斥它，必须直呼「小哈」，教它要有礼貌。"
+            "小哈说得还行时可以淡淡带过或接一句；有人在骂小哈、欺负它时要护短。"
+            "训斥或叫它时务必写出「小哈」这个名字。"
+        )
+
     def _audience_prompt(self, author: discord.User | discord.Member) -> str:
         if self._is_tomkk(author):
             return " 对方是 Tomkk，是你唯一亲近的人。对他你可以依然冷艳，但要明显多一点亲密和热情——这是你只对他才有的另一面，不要对其他人这样。"
         return ""
 
-    def _build_proactive_prompt(self, context_str: str, audience: str, has_image: bool) -> str:
+    def _build_proactive_prompt(self, context_str: str, audience: str, has_image: bool, has_xiaoha: bool) -> str:
         """插话专用 prompt：代码已按概率触发，此处只要求生成一句接话。"""
         scene = "看到了大家的聊天记录和一张图片" if has_image else "看到了大家的聊天记录"
+        xiaoha_hint = self._xiaoha_context_instruction(has_xiaoha)
         return (
             f"你（璐瑶）正在群里潜水，{scene}：\n\n---\n{context_str}\n---\n\n"
             "接一句话。简短、知性、高雅，能接茬，让人想继续聊。冷，但不拒人千里；"
             "偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。不要超过三行。"
+            f"{xiaoha_hint}"
             "必须输出一句可发送的中文短句。\n"
             f"{audience}直接说出你的回复，不要有任何多余的解释。"
+        )
+
+    def _build_mention_prompt(
+        self,
+        user_prompt: str,
+        context_str: str,
+        audience: str,
+        has_image: bool,
+        has_xiaoha: bool,
+    ) -> str:
+        xiaoha_hint = self._xiaoha_context_instruction(has_xiaoha)
+        context_block = f"\n\n以下是频道最近的聊天记录：\n---\n{context_str}\n---\n" if context_str else ""
+        if has_image:
+            return (
+                f"一个用户@了你（璐瑶），说了「{user_prompt}」，还发了张图。{context_block}\n"
+                "请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，从画面或对方意图切入，"
+                f"冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。{xiaoha_hint}{audience}直接说出你的回复。"
+            )
+        return (
+            f"一个用户@了你（璐瑶），对你说了：「{user_prompt}」。{context_block}\n"
+            "请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，但要能接茬。"
+            "冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。"
+            f"{xiaoha_hint}{audience}直接说出你的回复。"
         )
 
     async def _handle_proactive_chat(self, message):
         """姐姐我自家想插句嘴了呀"""
         async with message.channel.typing():
-            history = [msg async for msg in message.channel.history(limit=10)]
-            history.reverse()
-
-            context_str = "\n".join([
-                f"{msg.author.display_name}: {msg.content or '(无文字)'}"
-                for msg in history
-            ])
+            context_str, has_xiaoha = await self._build_channel_context(message)
             image_path = await self._get_image_from_message(message)
             audience = self._audience_prompt(message.author)
-            prompt = self._build_proactive_prompt(context_str, audience, bool(image_path))
+            prompt = self._build_proactive_prompt(context_str, audience, bool(image_path), has_xiaoha)
 
             if image_path:
                 response = await get_chat_completion_with_image(prompt, self.persona, image_path)
@@ -577,24 +627,40 @@ class SassySisterBot(commands.Bot):
 
     async def _handle_mention(self, message):
         """处理@我个消息"""
-        user_prompt = message.content.replace(f'<@!{self.user.id}>', '').strip()
+        user_prompt = message.content.replace(f'<@!{self.user.id}>', '').replace(f'<@{self.user.id}>', '').strip()
         
         async with message.channel.typing():
+            context_str, has_xiaoha = await self._build_channel_context(message)
             image_path = await self._get_image_from_message(message)
             audience = self._audience_prompt(message.author)
             
             if image_path:
-                full_prompt = f"一个用户@了你（璐瑶），说了“{user_prompt}”，还发了张图。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。{audience}直接说出你的回复。"
+                full_prompt = self._build_mention_prompt(
+                    user_prompt or "(无文字，只发了图)",
+                    context_str,
+                    audience,
+                    has_image=True,
+                    has_xiaoha=has_xiaoha,
+                )
                 response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
                 if not user_prompt:
-                    if self._is_tomkk(message.author):
+                    if has_xiaoha:
+                        user_prompt = "（对方@了你但没说什么，上下文里有小哈的发言）"
+                    elif self._is_tomkk(message.author):
                         await message.channel.send("嗯？怎么了。")
+                        return
                     else:
                         await message.channel.send("有事就说，别光看着。")
-                    return
-                full_prompt = f"一个用户@了你（璐瑶），对你说了：“{user_prompt}”。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，但要能接茬。冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。{audience}直接说出你的回复。"
+                        return
+                full_prompt = self._build_mention_prompt(
+                    user_prompt,
+                    context_str,
+                    audience,
+                    has_image=False,
+                    has_xiaoha=has_xiaoha,
+                )
                 response = await get_chat_completion(full_prompt, self.persona)
             
             if response:
