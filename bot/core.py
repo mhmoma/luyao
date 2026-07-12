@@ -35,6 +35,7 @@ class SassySisterBot(commands.Bot):
         self.persona = self._load_persona()
         self._ensure_temp_dir()
         self.proactive_chat_enabled = data_manager.get_setting("proactive_chat_enabled", True)
+        self.proactive_chat_probability = config.PROACTIVE_CHAT_PROBABILITY
         self.artwork_forwarding_enabled = data_manager.get_setting("artwork_forwarding_enabled", True)
     def _ensure_temp_dir(self):
         """为你的作品，准备一个专属的临时画室。"""
@@ -388,12 +389,21 @@ class SassySisterBot(commands.Bot):
             await message.channel.send("我只听白衣胜雪的。")
             return
 
-        history = [msg async for msg in message.channel.history(limit=2)]
-        if len(history) > 1 and history[1].author == self.user:
+        if not self.proactive_chat_enabled:
             return
 
-        if self.proactive_chat_enabled and random.random() < 0.3:
-            await self._handle_proactive_chat(message)
+        history = [msg async for msg in message.channel.history(limit=2)]
+        if len(history) > 1 and history[1].author == self.user:
+            print(f"[Proactive] 跳过：上一条是璐瑶自己发的 (channel={message.channel.id})")
+            return
+
+        roll = random.random()
+        if roll < self.proactive_chat_probability:
+            print(f"[Proactive] 触发插话 roll={roll:.3f}, threshold={self.proactive_chat_probability} (channel={message.channel.id}, author={message.author})")
+            try:
+                await self._handle_proactive_chat(message)
+            except Exception as e:
+                print(f"[Proactive] 插话处理失败: {e}")
 
     async def _get_image_from_message(self, message) -> Optional[str]: # 修改这一行
         """看看消息里厢有没得啥好看个图呀"""
@@ -424,26 +434,47 @@ class SassySisterBot(commands.Bot):
             return " 对方是 Tomkk，是你唯一亲近的人。对他你可以依然冷艳，但要明显多一点亲密和热情——这是你只对他才有的另一面，不要对其他人这样。"
         return ""
 
+    def _build_proactive_prompt(self, context_str: str, audience: str, has_image: bool) -> str:
+        """插话专用 prompt：代码已按概率触发，此处只要求生成一句接话。"""
+        scene = "看到了大家的聊天记录和一张图片" if has_image else "看到了大家的聊天记录"
+        return (
+            f"你（璐瑶）正在群里潜水，{scene}：\n\n---\n{context_str}\n---\n\n"
+            "接一句话。简短、知性、高雅，能接茬，让人想继续聊。冷，但不拒人千里；"
+            "偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。不要超过三行。"
+            "必须输出一句可发送的中文短句。\n"
+            f"{audience}直接说出你的回复，不要有任何多余的解释。"
+        )
+
     async def _handle_proactive_chat(self, message):
         """姐姐我自家想插句嘴了呀"""
         async with message.channel.typing():
             history = [msg async for msg in message.channel.history(limit=10)]
             history.reverse()
 
-            context_str = "\n".join([f"{msg.author.display_name}: {msg.content}" for msg in history])
+            context_str = "\n".join([
+                f"{msg.author.display_name}: {msg.content or '(无文字)'}"
+                for msg in history
+            ])
             image_path = await self._get_image_from_message(message)
             audience = self._audience_prompt(message.author)
+            prompt = self._build_proactive_prompt(context_str, audience, bool(image_path))
 
             if image_path:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录和一张图片。聊天记录如下：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。{audience}直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion_with_image(prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。{audience}直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion(prompt, self.persona)
+
+            if not response:
+                print("[Proactive] 模型返回空，用兜底短句重试一次")
+                retry_prompt = prompt + "\n\n你必须输出一句可发送的中文短句，不要留空。"
+                response = await get_chat_completion(retry_prompt, self.persona)
 
             if response:
                 await message.channel.send(response)
+                print(f"[Proactive] 已发送: {response[:50]}...")
+            else:
+                print("[Proactive] 重试后仍为空，放弃本次插话")
 
     async def _handle_reverse_prompt_command(self, message):
         """处理反推指令"""

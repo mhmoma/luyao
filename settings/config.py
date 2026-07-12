@@ -30,6 +30,13 @@ CLEANUP_CHANNEL_IDS = os.getenv("CLEANUP_CHANNEL_IDS")
 # ComfyUI Server Address
 COMFYUI_SERVER_ADDRESS = os.getenv("COMFYUI_SERVER_ADDRESS", "127.0.0.1:8188")
 
+# Proactive chat reply probability (0.0–1.0), default 0.3
+try:
+    PROACTIVE_CHAT_PROBABILITY = max(0.0, min(1.0, float(os.getenv("PROACTIVE_CHAT_PROBABILITY", "0.3"))))
+except ValueError:
+    print("警告: PROACTIVE_CHAT_PROBABILITY 无效，使用默认值 0.3")
+    PROACTIVE_CHAT_PROBABILITY = 0.3
+
 # IDLECLOUD API Settings
 API_BASE_URL = "https://api.idlecloud.cc/api"
 IDLECLOUD_API_KEY = os.getenv("IDLECLOUD_API_KEY")

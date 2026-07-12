@@ -100,6 +100,11 @@ async def _get_completion(messages: list) -> str:
             messages=messages,
         )
         response = completion.choices[0].message.content
+        if response is not None:
+            response = response.strip()
+        if not response:
+            print("[AI] 模型返回了空内容。")
+            return None
         return response
     except Exception as e:
         print(f"哎呀，连接“大脑”的时候出了点小问题，姐姐我有点“不舒服”：{e}")

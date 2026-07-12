@@ -31,6 +31,8 @@ services:
       # Channel IDs where the bot is allowed to respond.
       # Separate multiple IDs with commas, e.g., "123,456"
       - ALLOWED_CHANNEL_IDS=
+      # Proactive chat reply probability (0.0–1.0), default 0.3
+      - PROACTIVE_CHAT_PROBABILITY=0.3
 
       # ====================================================================
       # =================== OPTIONAL CONFIGURATIONS ========================
