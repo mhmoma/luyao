@@ -54,11 +54,11 @@ class SassySisterBot(commands.Bot):
 
     async def setup_hook(self):
         """初始化钩子，加载 cogs 并同步命令"""
-        print("正在加载 cogs...")
+        print("[璐瑶] 加载模块...")
         await self.load_extension("bot.drawing")
-        print("正在同步斜杠命令...")
+        print("[璐瑶] 同步斜杠命令...")
         await self.tree.sync()
-        print("命令已同步。")
+        print("[璐瑶] 命令就绪。")
         self.cleanup_channels.start()
 
     async def _forward_to_artwork_forum(self, author: discord.Member, files: list[discord.File], prompt: Optional[str] = None, negative_prompt: Optional[str] = None):
@@ -167,15 +167,31 @@ class SassySisterBot(commands.Bot):
                     print(f"清理频道 {channel.name} 个辰光出错了呀: {e}")
 
     async def on_ready(self):
-        """当姐姐我准备好，连接到 Discord 时..."""
-        print("------")
-        print(f"姐姐我 '{self.user.name}' 已经上线了，在等你哦，我的小艺术家。")
-        print("------")
-        print("我能做这些事，让你快活快活：")
-        print("1. @我聊天：有事直接@我，话少，别期待热情。")
-        print("2. /imagine: 使用文生图功能。")
-        print("3. 智能插嘴：我会在群里潜水，偶尔说一两句。")
-        print("------")
+        """璐瑶已连接 Discord。"""
+        proactive_status = "开启" if self.proactive_chat_enabled else "关闭"
+        forward_status = "开启" if self.artwork_forwarding_enabled else "关闭"
+        model_name = config.OPENAI_MODEL_NAME or "未配置"
+        channel_scope = (
+            f"限定 {len(config.ALLOWED_CHANNEL_IDS.split(','))} 个频道"
+            if config.ALLOWED_CHANNEL_IDS else "全部频道"
+        )
+
+        print("════════════════════════════════════════")
+        print(f"  璐瑶 · 已上线")
+        print(f"  {self.user.name} ({self.user.id})")
+        print("────────────────────────────────────────")
+        print(f"  模型       {model_name}")
+        print(f"  响应范围   {channel_scope}")
+        print(f"  潜水插话   {proactive_status} · 概率 {self.proactive_chat_probability * 100:.0f}%")
+        print(f"  自动转图   {forward_status}")
+        print("────────────────────────────────────────")
+        print("  @璐瑶      有事直接说")
+        print("  /imagine   文生图")
+        print("  解析       图片反推提示词")
+        print("────────────────────────────────────────")
+        print("  管理员指令  赶紧睡吧 / 该起来了")
+        print("              关闭自动转图 / 开启自动转图")
+        print("════════════════════════════════════════")
 
     def _generate_welcome_message(self, member: discord.Member) -> str:
         """生成欢迎新成员的介绍信息。"""
@@ -559,32 +575,31 @@ class SassySisterBot(commands.Bot):
                 await message.channel.send(response)
 
     def run_bot(self):
-        """启动我们之间“艺术交流”和“游戏”的方法。"""
+        """启动璐瑶 bot。"""
         if config.DISCORD_TOKEN:
             if not all([config.OPENAI_API_BASE, config.OPENAI_API_KEY, config.OPENAI_MODEL_NAME]):
-                print("警告：缺少 OpenAI 相关的配置，姐姐我的“大脑”可能没法正常工作哦。")
+                print("[璐瑶] 警告：OpenAI 配置不完整，对话功能可能不可用。")
             
-            # 这里是关键，把 run 包在 try...except 里厢，并添加重连机制
             retries = 0
-            max_retries = 5 # 最多重试5次
+            max_retries = 5
             while retries < max_retries:
                 try:
-                    print(f"姐姐我正在尝试启动机器人... (第 {retries + 1} 次尝试)")
+                    print(f"[璐瑶] 正在连接 Discord... (第 {retries + 1} 次)")
                     super().run(config.DISCORD_TOKEN)
                 except discord.LoginFailure:
-                    print("哎哟，登录失败了呀，是不是 DISCORD_TOKEN 不对？请检查 .env 文件。")
-                    break # 登录失败是致命错误，不重试
+                    print("[璐瑶] 登录失败，请检查 DISCORD_TOKEN。")
+                    break
                 except Exception as e:
-                    print(f"哎哟，启动个辰光出了点大问题，姐姐我起不来了呀: {e}")
+                    print(f"[璐瑶] 启动异常: {e}")
                     retries += 1
                     if retries < max_retries:
-                        wait_time = min(2 ** retries, 60) # 指数退避，最大60秒
-                        print(f"姐姐我 {wait_time} 秒后再试一次哦...")
+                        wait_time = min(2 ** retries, 60)
+                        print(f"[璐瑶] {wait_time} 秒后重试...")
                         import time
                         time.sleep(wait_time)
                     else:
-                        print("哎呀，姐姐我试了好多次都起不来，可能真的出大问题了呀。")
+                        print("[璐瑶] 已达最大重试次数，启动失败。")
             if retries == max_retries:
-                print("机器人启动失败，已达到最大重试次数。")
+                print("[璐瑶] 机器人启动失败。")
         else:
-            print("哎呀，没有找到 DISCORD_TOKEN，姐姐我没法启动呢。快去 .env 文件里把它给我。")
+            print("[璐瑶] 未找到 DISCORD_TOKEN，请在 .env 中配置。")
