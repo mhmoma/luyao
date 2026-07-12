@@ -49,7 +49,7 @@ class SassySisterBot(commands.Bot):
                 return f.read()
         except FileNotFoundError:
             print("哎呀，找不到 persona.md 文件，姐姐我的人设丢了，这可怎么办？")
-            return "你是璐瑶，一个来历不明、冷艳知性的女子。话不多，但每句都有分量；高雅，偶尔睥睨，但不拒人千里。小哈是你的宠物狗，你对它很护短。"
+            return "你是璐瑶，一个来历不明、冷艳知性的女子。话不多，但每句都有分量；高雅，偶尔睥睨，但不拒人千里。小哈是你的宠物狗，你对它很护短。Tomkk是你唯一亲近的人，只对他才会多一分亲密和热情。"
 
     async def setup_hook(self):
         """初始化钩子，加载 cogs 并同步命令"""
@@ -413,6 +413,17 @@ class SassySisterBot(commands.Bot):
                     return path
         return None
 
+    def _is_tomkk(self, author: discord.User | discord.Member) -> bool:
+        if config.TOMKK_USER_ID and str(author.id) == config.TOMKK_USER_ID:
+            return True
+        names = [author.name, getattr(author, "global_name", None), getattr(author, "display_name", None)]
+        return any(n and "tomkk" in n.lower() for n in names)
+
+    def _audience_prompt(self, author: discord.User | discord.Member) -> str:
+        if self._is_tomkk(author):
+            return " 对方是 Tomkk，是你唯一亲近的人。对他你可以依然冷艳，但要明显多一点亲密和热情——这是你只对他才有的另一面，不要对其他人这样。"
+        return ""
+
     async def _handle_proactive_chat(self, message):
         """姐姐我自家想插句嘴了呀"""
         async with message.channel.typing():
@@ -421,13 +432,14 @@ class SassySisterBot(commands.Bot):
 
             context_str = "\n".join([f"{msg.author.display_name}: {msg.content}" for msg in history])
             image_path = await self._get_image_from_message(message)
+            audience = self._audience_prompt(message.author)
 
             if image_path:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录和一张图片。聊天记录如下：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。直接说出你的回复，不要有任何多余的解释。"
+                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录和一张图片。聊天记录如下：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。{audience}直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion_with_image(prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
-                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。直接说出你的回复，不要有任何多余的解释。"
+                prompt = f"你（璐瑶）正在群里潜水，看到了大家的聊天记录：\n\n---\n{context_str}---\n\n现在，请你像一个有活人感的真人一样，用简短、知性、高雅的方式插一句话。话不多，但要能接茬，让人想继续聊。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。但不要长篇大论。{audience}直接说出你的回复，不要有任何多余的解释。"
                 response = await get_chat_completion(prompt, self.persona)
 
             if response:
@@ -496,17 +508,20 @@ class SassySisterBot(commands.Bot):
         
         async with message.channel.typing():
             image_path = await self._get_image_from_message(message)
+            audience = self._audience_prompt(message.author)
             
             if image_path:
-                # 当有图片时，引导模型判断并激活隐藏设定
-                full_prompt = f"一个用户@了你（璐瑶），说了“{user_prompt}”，还发了张图。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。直接说出你的回复。"
+                full_prompt = f"一个用户@了你（璐瑶），说了“{user_prompt}”，还发了张图。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。{audience}直接说出你的回复。"
                 response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
                 await aiofiles.os.remove(image_path)
             else:
                 if not user_prompt:
-                    await message.channel.send("有事就说，别光看着。")
+                    if self._is_tomkk(message.author):
+                        await message.channel.send("嗯？怎么了。")
+                    else:
+                        await message.channel.send("有事就说，别光看着。")
                     return
-                full_prompt = f"一个用户@了你（璐瑶），对你说了：“{user_prompt}”。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，但要能接茬。冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。直接说出你的回复。"
+                full_prompt = f"一个用户@了你（璐瑶），对你说了：“{user_prompt}”。请你根据人设，像真人一样用简短、知性、高雅的方式回应。话不多，但要能接茬。冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。{audience}直接说出你的回复。"
                 response = await get_chat_completion(full_prompt, self.persona)
             
             if response:
