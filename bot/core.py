@@ -36,7 +36,10 @@ class SassySisterBot(commands.Bot):
         self._ensure_temp_dir()
         self.proactive_chat_enabled = data_manager.get_setting("proactive_chat_enabled", True)
         self.proactive_chat_probability = config.PROACTIVE_CHAT_PROBABILITY
+        self.proactive_cooldown_seconds = config.PROACTIVE_COOLDOWN_SECONDS
         self.artwork_forwarding_enabled = data_manager.get_setting("artwork_forwarding_enabled", True)
+        self._channel_locks: dict[int, asyncio.Lock] = {}
+        self._last_proactive_at: dict[int, datetime] = {}
     def _ensure_temp_dir(self):
         """为你的作品，准备一个专属的临时画室。"""
         if not os.path.exists(TEMP_DIR):
@@ -182,7 +185,7 @@ class SassySisterBot(commands.Bot):
         print("────────────────────────────────────────")
         print(f"  模型       {model_name}")
         print(f"  响应范围   {channel_scope}")
-        print(f"  潜水插话   {proactive_status} · 概率 {self.proactive_chat_probability * 100:.0f}%")
+        print(f"  潜水插话   {proactive_status} · 概率 {self.proactive_chat_probability * 100:.0f}% · 冷却 {self.proactive_cooldown_seconds}s")
         print(f"  自动转图   {forward_status}")
         print("────────────────────────────────────────")
         print("  @璐瑶      有事直接说")
@@ -434,16 +437,60 @@ class SassySisterBot(commands.Bot):
         if not self.proactive_chat_enabled:
             return
 
+        await self._maybe_trigger_proactive_chat(message)
+
+    def _get_channel_lock(self, channel_id: int) -> asyncio.Lock:
+        if channel_id not in self._channel_locks:
+            self._channel_locks[channel_id] = asyncio.Lock()
+        return self._channel_locks[channel_id]
+
+    def _is_proactive_on_cooldown(self, channel_id: int) -> bool:
+        last_at = self._last_proactive_at.get(channel_id)
+        if not last_at:
+            return False
+        elapsed = (datetime.now(timezone.utc) - last_at).total_seconds()
+        return elapsed < self.proactive_cooldown_seconds
+
+    async def _maybe_trigger_proactive_chat(self, message: discord.Message):
+        channel_id = message.channel.id
+
+        if self._is_proactive_on_cooldown(channel_id):
+            print(f"[Proactive] 跳过：频道冷却中 (channel={channel_id})")
+            return
+
+        lock = self._get_channel_lock(channel_id)
+        if lock.locked():
+            print(f"[Proactive] 跳过：本频道正在生成回复 (channel={channel_id})")
+            return
+
         history = [msg async for msg in message.channel.history(limit=2)]
         if len(history) > 1 and history[1].author == self.user:
-            print(f"[Proactive] 跳过：上一条是璐瑶自己发的 (channel={message.channel.id})")
+            print(f"[Proactive] 跳过：上一条是璐瑶自己发的 (channel={channel_id})")
             return
 
         roll = random.random()
-        if roll < self.proactive_chat_probability:
-            print(f"[Proactive] 触发插话 roll={roll:.3f}, threshold={self.proactive_chat_probability} (channel={message.channel.id}, author={message.author})")
+        if roll >= self.proactive_chat_probability:
+            return
+
+        print(
+            f"[Proactive] 触发插话 roll={roll:.3f}, threshold={self.proactive_chat_probability} "
+            f"(channel={channel_id}, author={message.author})"
+        )
+
+        async with lock:
+            if self._is_proactive_on_cooldown(channel_id):
+                print(f"[Proactive] 跳过：频道冷却中（锁内复检） (channel={channel_id})")
+                return
+
+            history = [msg async for msg in message.channel.history(limit=2)]
+            if len(history) > 1 and history[1].author == self.user:
+                print(f"[Proactive] 跳过：上一条是璐瑶自己发的（锁内复检） (channel={channel_id})")
+                return
+
             try:
-                await self._handle_proactive_chat(message)
+                sent = await self._handle_proactive_chat(message)
+                if sent:
+                    self._last_proactive_at[channel_id] = datetime.now(timezone.utc)
             except Exception as e:
                 print(f"[Proactive] 插话处理失败: {e}")
 
@@ -547,6 +594,12 @@ class SassySisterBot(commands.Bot):
             return " 对方是 Tomkk，是你唯一亲近的人。对他你可以依然冷艳，但要明显多一点亲密和热情——这是你只对他才有的另一面，不要对其他人这样。"
         return ""
 
+    def _image_reply_hint(self) -> str:
+        return (
+            " 图片里若有报错、节点、参数或工作流界面，看清后给具体指点；"
+            "不要用「它已经告诉你了」「看着办」这类空话敷衍。"
+        )
+
     def _build_proactive_prompt(
         self,
         context_str: str,
@@ -558,13 +611,14 @@ class SassySisterBot(commands.Bot):
         """插话专用 prompt：代码已按概率触发，此处只要求生成一句接话。"""
         scene = "看到了大家的聊天记录和一张图片" if has_image else "看到了大家的聊天记录"
         xiaoha_hint = self._xiaoha_context_instruction(xiaoha_situation)
+        image_hint = self._image_reply_hint() if has_image else ""
         return (
             f"你（璐瑶）正在群里潜水，{scene}：\n\n---\n{context_str}\n---\n\n"
             f"{trigger_focus}\n"
             "接一句话，必须紧扣【当前要接的话】的话题，不要牛头不对马嘴。"
             "简短、知性、高雅，能接茬。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。"
-            "不要超过三行。"
-            f"{xiaoha_hint}"
+            "不要超过三行。只输出一条消息，不要连发。"
+            f"{image_hint}{xiaoha_hint}"
             "必须输出一句可发送的中文短句。\n"
             f"{audience}直接说出你的回复，不要有任何多余的解释。"
         )
@@ -579,6 +633,7 @@ class SassySisterBot(commands.Bot):
         xiaoha_situation: Literal["none", "stale", "active", "from_xiaoha"],
     ) -> str:
         xiaoha_hint = self._xiaoha_context_instruction(xiaoha_situation)
+        image_hint = self._image_reply_hint() if has_image else ""
         context_block = f"\n\n以下是频道最近的聊天记录：\n---\n{context_str}\n---\n" if context_str else ""
         if has_image:
             return (
@@ -586,7 +641,7 @@ class SassySisterBot(commands.Bot):
                 f"{trigger_focus}\n"
                 "必须紧扣对方的问题和【当前要接的话】回应，不要答非所问。"
                 "简短、知性、高雅，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。"
-                f"{xiaoha_hint}{audience}直接说出你的回复。"
+                f"{image_hint}{xiaoha_hint}{audience}直接说出你的回复。"
             )
         return (
             f"一个用户@了你（璐瑶），对你说了：「{user_prompt}」。{context_block}\n"
@@ -596,7 +651,7 @@ class SassySisterBot(commands.Bot):
             f"{xiaoha_hint}{audience}直接说出你的回复。"
         )
 
-    async def _handle_proactive_chat(self, message):
+    async def _handle_proactive_chat(self, message) -> bool:
         """姐姐我自家想插句嘴了呀"""
         async with message.channel.typing():
             context_str, xiaoha_situation = await self._build_channel_context(message)
@@ -621,8 +676,9 @@ class SassySisterBot(commands.Bot):
             if response:
                 await message.channel.send(response)
                 print(f"[Proactive] 已发送: {response[:50]}...")
-            else:
-                print("[Proactive] 重试后仍为空，放弃本次插话")
+                return True
+            print("[Proactive] 重试后仍为空，放弃本次插话")
+            return False
 
     async def _handle_reverse_prompt_command(self, message):
         """处理反推指令"""
@@ -684,46 +740,47 @@ class SassySisterBot(commands.Bot):
     async def _handle_mention(self, message):
         """处理@我个消息"""
         user_prompt = message.content.replace(f'<@!{self.user.id}>', '').replace(f'<@{self.user.id}>', '').strip()
-        
-        async with message.channel.typing():
-            context_str, xiaoha_situation = await self._build_channel_context(message)
-            trigger_focus = self._format_trigger_focus(message)
-            image_path = await self._get_image_from_message(message)
-            audience = self._audience_prompt(message.author)
-            
-            if image_path:
-                full_prompt = self._build_mention_prompt(
-                    user_prompt or "(无文字，只发了图)",
-                    context_str,
-                    trigger_focus,
-                    audience,
-                    has_image=True,
-                    xiaoha_situation=xiaoha_situation,
-                )
-                response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
-                await aiofiles.os.remove(image_path)
-            else:
-                if not user_prompt:
-                    if xiaoha_situation in ("active", "from_xiaoha"):
-                        user_prompt = "（对方@了你但没说什么，小哈刚才在说话）"
-                    elif self._is_tomkk(message.author):
-                        await message.channel.send("嗯？怎么了。")
-                        return
-                    else:
-                        await message.channel.send("有事就说，别光看着。")
-                        return
-                full_prompt = self._build_mention_prompt(
-                    user_prompt,
-                    context_str,
-                    trigger_focus,
-                    audience,
-                    has_image=False,
-                    xiaoha_situation=xiaoha_situation,
-                )
-                response = await get_chat_completion(full_prompt, self.persona)
-            
-            if response:
-                await message.channel.send(response)
+
+        async with self._get_channel_lock(message.channel.id):
+            async with message.channel.typing():
+                context_str, xiaoha_situation = await self._build_channel_context(message)
+                trigger_focus = self._format_trigger_focus(message)
+                image_path = await self._get_image_from_message(message)
+                audience = self._audience_prompt(message.author)
+                
+                if image_path:
+                    full_prompt = self._build_mention_prompt(
+                        user_prompt or "(无文字，只发了图)",
+                        context_str,
+                        trigger_focus,
+                        audience,
+                        has_image=True,
+                        xiaoha_situation=xiaoha_situation,
+                    )
+                    response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
+                    await aiofiles.os.remove(image_path)
+                else:
+                    if not user_prompt:
+                        if xiaoha_situation in ("active", "from_xiaoha"):
+                            user_prompt = "（对方@了你但没说什么，小哈刚才在说话）"
+                        elif self._is_tomkk(message.author):
+                            await message.channel.send("嗯？怎么了。")
+                            return
+                        else:
+                            await message.channel.send("有事就说，别光看着。")
+                            return
+                    full_prompt = self._build_mention_prompt(
+                        user_prompt,
+                        context_str,
+                        trigger_focus,
+                        audience,
+                        has_image=False,
+                        xiaoha_situation=xiaoha_situation,
+                    )
+                    response = await get_chat_completion(full_prompt, self.persona)
+                
+                if response:
+                    await message.channel.send(response)
 
     def run_bot(self):
         """启动璐瑶 bot。"""

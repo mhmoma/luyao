@@ -40,6 +40,13 @@ except ValueError:
     print("警告: PROACTIVE_CHAT_PROBABILITY 无效，使用默认值 0.3")
     PROACTIVE_CHAT_PROBABILITY = 0.3
 
+# Minimum seconds between proactive replies in the same channel
+try:
+    PROACTIVE_COOLDOWN_SECONDS = max(0, int(os.getenv("PROACTIVE_COOLDOWN_SECONDS", "90")))
+except ValueError:
+    print("警告: PROACTIVE_COOLDOWN_SECONDS 无效，使用默认值 90")
+    PROACTIVE_COOLDOWN_SECONDS = 90
+
 # IDLECLOUD API Settings
 API_BASE_URL = "https://api.idlecloud.cc/api"
 IDLECLOUD_API_KEY = os.getenv("IDLECLOUD_API_KEY")

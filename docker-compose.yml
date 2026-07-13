@@ -35,6 +35,8 @@ services:
       - ALLOWED_CHANNEL_IDS=
       # Proactive chat reply probability (0.0–1.0), default 0.3
       - PROACTIVE_CHAT_PROBABILITY=0.3
+      # Minimum seconds between proactive replies in the same channel
+      - PROACTIVE_COOLDOWN_SECONDS=${PROACTIVE_COOLDOWN_SECONDS:-90}
 
       # ====================================================================
       # =================== OPTIONAL CONFIGURATIONS ========================
