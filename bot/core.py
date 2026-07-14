@@ -53,7 +53,7 @@ class SassySisterBot(commands.Bot):
                 return f.read()
         except FileNotFoundError:
             print("哎呀，找不到 persona.md 文件，姐姐我的人设丢了，这可怎么办？")
-            return "你是璐瑶，一个来历不明、冷艳知性的女子。话不多，但每句都有分量；高雅，偶尔睥睨，但不拒人千里。小哈是你的宠物狗，你对它很护短。Tomkk是你唯一亲近的人，只对他才会多一分亲密和热情。"
+            return "你是璐瑶。冷，话少，对题，有内容。不装神棍，不发鸡汤。小哈是你的狗，你护它。Tomkk是你唯一亲近的人，只对他更软一点。"
 
     async def setup_hook(self):
         """初始化钩子，加载 cogs 并同步命令"""
@@ -597,7 +597,14 @@ class SassySisterBot(commands.Bot):
     def _image_reply_hint(self) -> str:
         return (
             " 图片里若有报错、节点、参数或工作流界面，看清后给具体指点；"
-            "不要用「它已经告诉你了」「看着办」这类空话敷衍。"
+            "画作就谈画面本身。不要空话敷衍。"
+        )
+
+    def _speaking_guard(self) -> str:
+        return (
+            " 说话铁律：对题、短、有内容。"
+            "禁止空泛玄学、心态升华、人生导师口吻，禁止「问题不在……在你看待……」「你急什么」「它已经告诉你了」「看着办」这类空话。"
+            "闲聊就接闲聊，技术就谈可操作的判断或问缺什么信息。冷艳靠语气短净，不靠装深沉。"
         )
 
     def _build_proactive_prompt(
@@ -612,15 +619,15 @@ class SassySisterBot(commands.Bot):
         scene = "看到了大家的聊天记录和一张图片" if has_image else "看到了大家的聊天记录"
         xiaoha_hint = self._xiaoha_context_instruction(xiaoha_situation)
         image_hint = self._image_reply_hint() if has_image else ""
+        speaking_guard = self._speaking_guard()
         return (
-            f"你（璐瑶）正在群里潜水，{scene}：\n\n---\n{context_str}\n---\n\n"
+            f"你是璐瑶，正在群里潜水，{scene}：\n\n---\n{context_str}\n---\n\n"
             f"{trigger_focus}\n"
-            "接一句话，必须紧扣【当前要接的话】的话题，不要牛头不对马嘴。"
-            "简短、知性、高雅，能接茬。冷，但不拒人千里；偶尔睥睨，偶尔点破；若有人贬低小哈，要护短。"
-            "不要超过三行。只输出一条消息，不要连发。"
-            f"{image_hint}{xiaoha_hint}"
-            "必须输出一句可发送的中文短句。\n"
-            f"{audience}直接说出你的回复，不要有任何多余的解释。"
+            "按人设接一句话。必须紧扣【当前要接的话】，不要答非所问。"
+            "若有人贬低小哈，护短。只输出一条消息，不要超过三行。"
+            f"{speaking_guard}{image_hint}{xiaoha_hint}"
+            "直接说出要发的那句话，不要解释。\n"
+            f"{audience}"
         )
 
     def _build_mention_prompt(
@@ -634,21 +641,20 @@ class SassySisterBot(commands.Bot):
     ) -> str:
         xiaoha_hint = self._xiaoha_context_instruction(xiaoha_situation)
         image_hint = self._image_reply_hint() if has_image else ""
+        speaking_guard = self._speaking_guard()
         context_block = f"\n\n以下是频道最近的聊天记录：\n---\n{context_str}\n---\n" if context_str else ""
         if has_image:
             return (
-                f"一个用户@了你（璐瑶），说了「{user_prompt}」，还发了张图。{context_block}\n"
+                f"用户@了你（璐瑶），说了「{user_prompt}」，还发了张图。{context_block}\n"
                 f"{trigger_focus}\n"
-                "必须紧扣对方的问题和【当前要接的话】回应，不要答非所问。"
-                "简短、知性、高雅，从画面或对方意图切入，冷而不冰，偶尔睥睨；若涉及小哈被贬低，要护短。"
-                f"{image_hint}{xiaoha_hint}{audience}直接说出你的回复。"
+                "按人设回应。紧扣对方的话和【当前要接的话】，不要答非所问。"
+                f"{speaking_guard}{image_hint}{xiaoha_hint}{audience}直接说出要发的那句话。"
             )
         return (
-            f"一个用户@了你（璐瑶），对你说了：「{user_prompt}」。{context_block}\n"
+            f"用户@了你（璐瑶），说了：「{user_prompt}」。{context_block}\n"
             f"{trigger_focus}\n"
-            "必须紧扣对方的问题和【当前要接的话】回应，不要答非所问。"
-            "简短、知性、高雅，能接茬。冷，但不拒人千里；看穿对方在掩饰什么，偶尔点破；若涉及小哈被贬低，要护短。"
-            f"{xiaoha_hint}{audience}直接说出你的回复。"
+            "按人设回应。紧扣对方的话和【当前要接的话】，不要答非所问。"
+            f"{speaking_guard}{xiaoha_hint}{audience}直接说出要发的那句话。"
         )
 
     async def _handle_proactive_chat(self, message) -> bool:
