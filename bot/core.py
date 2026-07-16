@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from settings import config
 from ai.client import get_chat_completion, get_chat_completion_with_image, download_image, get_image_tags_from_comfyui
-from bot.data_manager import data_manager
+from bot.data_manager import data_manager, FAVOR_MAX
 from urllib.parse import urlparse
 import os
 import uuid
@@ -395,6 +395,39 @@ class SassySisterBot(commands.Bot):
                     await message.channel.send(f"重载模块 `{cog_name}` 的时候出错了呀：\n```py\n{e}\n```")
                     print(f"Error reloading cog 'bot.{cog_name}': {e}")
                 return
+            elif message.content.startswith("好感"):
+                target_member = message.mentions[0] if message.mentions else None
+                if not target_member:
+                    await message.channel.send("格式：`好感 @某人`")
+                    return
+
+                state = data_manager.get_user_favor_state(str(target_member.id))
+                favor = int(state.get("favor", 0))
+                stage = self._favor_stage(favor)
+                stage_label = self._favor_stage_label(stage)
+                total_messages = int(state.get("total_messages", 0))
+                last_message_at = state.get("last_message_at") or "无记录"
+                events = state.get("events", []) or []
+                last_event = events[-1] if events else None
+
+                if last_event:
+                    delta = int(last_event.get("delta", 0))
+                    delta_text = f"{delta:+d}"
+                    reason = last_event.get("reason", "unknown")
+                    snippet = last_event.get("snippet", "")
+                    last_event_text = f"最近变动：{delta_text}（{reason}）\n片段：{snippet}"
+                else:
+                    last_event_text = "最近变动：无"
+
+                await message.channel.send(
+                    f"{target_member.mention} 的好感信息：\n"
+                    f"- 当前好感：{favor}/{FAVOR_MAX}\n"
+                    f"- 阶段：{stage_label}（{stage}）\n"
+                    f"- 累计记录轮数：{total_messages}\n"
+                    f"- 上次更新时间：{last_message_at}\n"
+                    f"- {last_event_text}"
+                )
+                return
         
         # 2. 核心指令检查
         if message.content.strip().lower() == "解析":
@@ -594,6 +627,102 @@ class SassySisterBot(commands.Bot):
             return " 对方是 Tomkk，是你唯一亲近的人。对他你可以依然冷艳，但要明显多一点亲密和热情——这是你只对他才有的另一面，不要对其他人这样。"
         return ""
 
+    def _clamp_favor(self, favor: int) -> int:
+        return max(0, min(FAVOR_MAX, int(favor)))
+
+    def _favor_stage(self, favor: int) -> str:
+        favor = self._clamp_favor(favor)
+        if favor >= 100:
+            return "bond"
+        if favor >= 60:
+            return "warm"
+        if favor >= 30:
+            return "familiar"
+        if favor >= 10:
+            return "normal"
+        return "cold"
+
+    def _favor_stage_label(self, stage: str) -> str:
+        labels = {
+            "cold": "初识",
+            "normal": "普通",
+            "familiar": "熟悉",
+            "warm": "亲近",
+            "bond": "默契",
+        }
+        return labels.get(stage, stage)
+
+    def _favor_tone_prompt(self, favor: int) -> str:
+        favor = self._clamp_favor(favor)
+        stage = self._favor_stage(favor)
+        label = self._favor_stage_label(stage)
+        examples = {
+            "cold": "「说重点。」「嗯。」「图发来。」",
+            "normal": "「可以，继续说。」「参数贴出来。」「这倒有点意思。」",
+            "familiar": "「上次那张比这张干净。」「行，按我说的改。」「……你又熬夜了？」",
+            "warm": "「发来看看，我帮你盯一眼。」「别急，报错全文贴来。」「嗯，这次比上回好多了。」",
+            "bond": "「在。说吧。」「……算了，陪你说两句。」「你这点我记着呢，不用重复。」",
+        }
+        tone_rules = {
+            "cold": "保持偏冷、短句、对题。礼貌在，热情不在。",
+            "normal": "保持冷静礼貌，可比初识多给一点解释，但仍保持距离。",
+            "familiar": "语气比默认稍松，可自然接话与简短追问，别过度热情。",
+            "warm": "语气明显更柔和，愿意多说半句，允许自然关心，但不撒娇不肉麻。",
+            "bond": "像很熟的熟人，语气随意自然，可主动接住对方情绪，但仍不肉麻、不对路人复制 Tomkk 式亲密。",
+        }
+        return (
+            f" 当前与该用户好感度={favor}/{FAVOR_MAX}（{label}）。"
+            f"{tone_rules[stage]}"
+            f"参考语气示例（勿照抄，按场景变通）：{examples[stage]}"
+        )
+
+    def _build_persona_with_favor(self, favor: int) -> str:
+        return self.persona + "\n\n【好感系统约束】" + self._favor_tone_prompt(favor)
+
+    def _compute_favor_delta(
+        self,
+        text: str,
+        has_image: bool,
+        is_tomkk: bool,
+    ) -> tuple[int, str]:
+        content = (text or "").strip().lower()
+        if not content and not has_image:
+            return 0, "empty_ping"
+
+        insult_hit = any(k in content for k in ["傻", "滚", "废物", "垃圾", "你配", "脑残", "弱智", "去死"])
+        rude_hit = any(k in content for k in ["闭嘴", "少废话", "别装", "装什么", "阴阳怪气"])
+        thanks_hit = any(k in content for k in ["谢谢", "感谢", "辛苦", "多谢", "thx", "thanks"])
+        polite_hit = any(k in content for k in ["请", "麻烦", "可以吗", "劳驾", "拜托"])
+        constructive_hit = any(k in content for k in ["参数", "报错", "节点", "工作流", "怎么", "如何", "帮我看", "建议"])
+
+        delta = 0
+        reasons: list[str] = []
+        if insult_hit:
+            delta -= 10
+            reasons.append("insult")
+        if rude_hit:
+            delta -= 4
+            reasons.append("rude")
+        if thanks_hit:
+            delta += 3
+            reasons.append("thanks")
+        if polite_hit:
+            delta += 2
+            reasons.append("polite")
+        if constructive_hit:
+            delta += 1
+            reasons.append("constructive")
+        if has_image and not insult_hit:
+            delta += 1
+            reasons.append("shared_image")
+
+        if is_tomkk and delta < 0:
+            delta = int(delta / 2)
+            reasons.append("tomkk_soften_penalty")
+
+        delta = max(-12, min(8, delta))
+        return delta, ",".join(reasons) if reasons else "neutral"
+
     def _image_reply_hint(self) -> str:
         return (
             " 图片里若有报错、节点、参数或工作流界面，看清后给具体指点；"
@@ -746,13 +875,17 @@ class SassySisterBot(commands.Bot):
     async def _handle_mention(self, message):
         """处理@我个消息"""
         user_prompt = message.content.replace(f'<@!{self.user.id}>', '').replace(f'<@{self.user.id}>', '').strip()
+        user_id = str(message.author.id)
+        favor_state = data_manager.get_user_favor_state(user_id)
+        current_favor = self._clamp_favor(int(favor_state.get("favor", 0)))
+        persona_with_favor = self._build_persona_with_favor(current_favor)
 
         async with self._get_channel_lock(message.channel.id):
             async with message.channel.typing():
                 context_str, xiaoha_situation = await self._build_channel_context(message)
                 trigger_focus = self._format_trigger_focus(message)
                 image_path = await self._get_image_from_message(message)
-                audience = self._audience_prompt(message.author)
+                audience = self._audience_prompt(message.author) + self._favor_tone_prompt(current_favor)
                 
                 if image_path:
                     full_prompt = self._build_mention_prompt(
@@ -763,7 +896,7 @@ class SassySisterBot(commands.Bot):
                         has_image=True,
                         xiaoha_situation=xiaoha_situation,
                     )
-                    response = await get_chat_completion_with_image(full_prompt, self.persona, image_path)
+                    response = await get_chat_completion_with_image(full_prompt, persona_with_favor, image_path)
                     await aiofiles.os.remove(image_path)
                 else:
                     if not user_prompt:
@@ -783,10 +916,23 @@ class SassySisterBot(commands.Bot):
                         has_image=False,
                         xiaoha_situation=xiaoha_situation,
                     )
-                    response = await get_chat_completion(full_prompt, self.persona)
+                    response = await get_chat_completion(full_prompt, persona_with_favor)
                 
                 if response:
                     await message.channel.send(response)
+                    delta, reason = self._compute_favor_delta(
+                        user_prompt,
+                        bool(image_path),
+                        self._is_tomkk(message.author),
+                    )
+                    favor_after = self._clamp_favor(current_favor + delta)
+                    await data_manager.apply_favor_delta(
+                        user_id=user_id,
+                        delta=delta,
+                        reason=reason,
+                        message_snippet=(user_prompt or "(无文字，只发了图)"),
+                        stage=self._favor_stage(favor_after),
+                    )
 
     def run_bot(self):
         """启动璐瑶 bot。"""
