@@ -318,13 +318,88 @@ class SassySisterBot(commands.Bot):
             return
         await self._handle_artwork_message(after)
 
+    def _is_admin(self, author: discord.User | discord.Member) -> bool:
+        user_id = str(author.id)
+        if config.ADMIN_USER_ID and user_id == config.ADMIN_USER_ID:
+            return True
+        if config.TOMKK_USER_ID and user_id == config.TOMKK_USER_ID:
+            return True
+        return False
+
+    def _strip_bot_mention(self, content: str) -> str:
+        if not self.user:
+            return (content or "").strip()
+        return (
+            (content or "")
+            .replace(f"<@!{self.user.id}>", "")
+            .replace(f"<@{self.user.id}>", "")
+            .strip()
+        )
+
+    def _is_favor_query(self, message: discord.Message) -> bool:
+        text = self._strip_bot_mention(message.content)
+        return text.startswith("好感")
+
+    def _favor_query_target(self, message: discord.Message) -> Optional[discord.User | discord.Member]:
+        for member in message.mentions:
+            if member.id != self.user.id:
+                return member
+        return None
+
+    async def _handle_favor_query_command(self, message: discord.Message) -> bool:
+        """管理员查询某人好感。返回 True 表示已处理。"""
+        target_member = self._favor_query_target(message)
+        if not target_member:
+            await message.channel.send("格式：`好感 @某人`")
+            return True
+
+        state = data_manager.get_user_favor_state(str(target_member.id))
+        favor = int(state.get("favor", 0))
+        stage = self._favor_stage(favor)
+        stage_label = self._favor_stage_label(stage)
+        total_messages = int(state.get("total_messages", 0))
+        last_message_at = state.get("last_message_at") or "无记录"
+        events = state.get("events", []) or []
+        last_event = events[-1] if events else None
+
+        if last_event:
+            delta = int(last_event.get("delta", 0))
+            delta_text = f"{delta:+d}"
+            reason = last_event.get("reason", "unknown")
+            snippet = last_event.get("snippet", "")
+            last_event_text = f"最近变动：{delta_text}（{reason}）\n片段：{snippet}"
+        else:
+            last_event_text = "最近变动：无"
+
+        await message.channel.send(
+            f"{target_member.mention} 的好感信息：\n"
+            f"- 当前好感：{favor}/{FAVOR_MAX}\n"
+            f"- 阶段：{stage_label}（{stage}）\n"
+            f"- 累计记录轮数：{total_messages}\n"
+            f"- 上次更新时间：{last_message_at}\n"
+            f"- {last_event_text}"
+        )
+        print(
+            f"[璐瑶] 好感查询 | 目标: {target_member} ({target_member.id}) "
+            f"favor={favor} stage={stage} | 操作者: {message.author} ({message.author.id})"
+        )
+        return True
+
     async def on_message(self, message):
         """每次你说话、发图，我都会看到..."""
         # 0. 忽略机器人自己
         if message.author.bot:
             return
 
-        # 1. 优先处理@消息，确保任何情况下都能响应
+        # 1. 好感查询（管理员专用，优先于 @ 回复，避免被插话逻辑吞掉）
+        if self._is_favor_query(message):
+            if self._is_admin(message.author):
+                await self._handle_favor_query_command(message)
+            else:
+                await message.channel.send("这个指令不对你开放。")
+            return
+
+        # 2. 优先处理@消息，确保任何情况下都能响应
         if self.user.mentioned_in(message):
             try:
                 await self._handle_mention(message)
@@ -337,8 +412,8 @@ class SassySisterBot(commands.Bot):
         print(f"[Debug] New message from {message.author} in channel #{channel_name} ({message.channel.id}): '{message.content}'")
 
         # --- 处理用户发的消息 ---
-        # 2. 管理员指令检查：拥有最高优先权，不受频道限制
-        if config.ADMIN_USER_ID and str(message.author.id) == config.ADMIN_USER_ID:
+        # 3. 管理员指令检查：拥有最高优先权，不受频道限制
+        if self._is_admin(message.author):
             if message.content.startswith("!发送介绍"):
                 # 优先选择被@的第一个人，如果没有，就选择发消息的管理员自己
                 target_member = message.mentions[0] if message.mentions else message.author
@@ -395,53 +470,20 @@ class SassySisterBot(commands.Bot):
                     await message.channel.send(f"重载模块 `{cog_name}` 的时候出错了呀：\n```py\n{e}\n```")
                     print(f"Error reloading cog 'bot.{cog_name}': {e}")
                 return
-            elif message.content.startswith("好感"):
-                target_member = message.mentions[0] if message.mentions else None
-                if not target_member:
-                    await message.channel.send("格式：`好感 @某人`")
-                    return
-
-                state = data_manager.get_user_favor_state(str(target_member.id))
-                favor = int(state.get("favor", 0))
-                stage = self._favor_stage(favor)
-                stage_label = self._favor_stage_label(stage)
-                total_messages = int(state.get("total_messages", 0))
-                last_message_at = state.get("last_message_at") or "无记录"
-                events = state.get("events", []) or []
-                last_event = events[-1] if events else None
-
-                if last_event:
-                    delta = int(last_event.get("delta", 0))
-                    delta_text = f"{delta:+d}"
-                    reason = last_event.get("reason", "unknown")
-                    snippet = last_event.get("snippet", "")
-                    last_event_text = f"最近变动：{delta_text}（{reason}）\n片段：{snippet}"
-                else:
-                    last_event_text = "最近变动：无"
-
-                await message.channel.send(
-                    f"{target_member.mention} 的好感信息：\n"
-                    f"- 当前好感：{favor}/{FAVOR_MAX}\n"
-                    f"- 阶段：{stage_label}（{stage}）\n"
-                    f"- 累计记录轮数：{total_messages}\n"
-                    f"- 上次更新时间：{last_message_at}\n"
-                    f"- {last_event_text}"
-                )
-                return
         
-        # 2. 核心指令检查
+        # 4. 核心指令检查
         if message.content.strip().lower() == "解析":
             await self._handle_reverse_prompt_command(message)
             return
 
-        # 3. 检查频道是否在允许列表中，如果设置了该规则，则不符合的频道直接忽略后续所有逻辑
+        # 5. 检查频道是否在允许列表中，如果设置了该规则，则不符合的频道直接忽略后续所有逻辑
         if config.ALLOWED_CHANNEL_IDS:
             allowed_ids = [int(cid.strip()) for cid in config.ALLOWED_CHANNEL_IDS.split(',')]
             if message.channel.id not in allowed_ids:
                 print(f"[Debug] Message in channel {message.channel.id} ignored due to ALLOWED_CHANNEL_IDS setting.")
                 return # 不在允许的频道，直接返回
 
-        # 4. 特定频道图片删除与转发
+        # 6. 特定频道图片删除与转发
         if self.artwork_forwarding_enabled and message.channel.id in [1442454462730993697, 1442459566565752845]:
             if message.attachments and any(att.content_type and att.content_type.startswith('image/') for att in message.attachments):
                 try:
@@ -461,8 +503,8 @@ class SassySisterBot(commands.Bot):
                     print(f"删除图片消息个辰光出错了呀: {e}")
                 return
         
-        # 5. 其他指令和互动
-        if message.content in ["赶紧睡吧", "该起来了", "关闭自动转图", "开启自动转图", "状态", "待机"] and (not config.ADMIN_USER_ID or str(message.author.id) != config.ADMIN_USER_ID):
+        # 7. 其他指令和互动
+        if message.content in ["赶紧睡吧", "该起来了", "关闭自动转图", "开启自动转图", "状态", "待机"] and not self._is_admin(message.author):
             print(f"[璐瑶] 开关操作被拒绝 | {message.author} ({message.author.id}) 尝试: {message.content}")
             await message.channel.send("我只听白衣胜雪的。")
             return
