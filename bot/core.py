@@ -15,6 +15,14 @@ import re
 from typing import Optional, Literal
 
 TEMP_DIR = "temp"
+FAVOR_DAILY_GAIN_CAP = 12
+FAVOR_POSITIVE_MIN_INTERVAL = 45
+FAVOR_EVENT_COOLDOWN_SECONDS = {
+    "thanks": 1800,
+    "polite": 1200,
+    "constructive": 600,
+    "shared_image": 1800,
+}
 
 class SassySisterBot(commands.Bot):
     def __init__(self, **options):
@@ -721,11 +729,56 @@ class SassySisterBot(commands.Bot):
     def _build_persona_with_favor(self, favor: int) -> str:
         return self.persona + "\n\n【好感系统约束】" + self._favor_tone_prompt(favor)
 
+    def _parse_favor_event_time(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def _favor_positive_gain_today(self, events: list) -> int:
+        today = datetime.now(timezone.utc).date()
+        total = 0
+        for event in events:
+            delta = int(event.get("delta", 0) or 0)
+            if delta <= 0:
+                continue
+            at = self._parse_favor_event_time(event.get("at"))
+            if at and at.astimezone(timezone.utc).date() == today:
+                total += delta
+        return total
+
+    def _favor_last_positive_at(self, events: list) -> Optional[datetime]:
+        for event in reversed(events):
+            if int(event.get("delta", 0) or 0) > 0:
+                return self._parse_favor_event_time(event.get("at"))
+        return None
+
+    def _favor_tag_on_cooldown(self, events: list, tag: str, now: datetime) -> bool:
+        cooldown = FAVOR_EVENT_COOLDOWN_SECONDS.get(tag, 0)
+        if cooldown <= 0:
+            return False
+        for event in reversed(events):
+            reasons = str(event.get("reason", "")).split(",")
+            if tag not in reasons:
+                continue
+            if int(event.get("delta", 0) or 0) <= 0:
+                continue
+            at = self._parse_favor_event_time(event.get("at"))
+            if not at:
+                continue
+            if (now - at.astimezone(timezone.utc)).total_seconds() < cooldown:
+                return True
+            break
+        return False
+
     def _compute_favor_delta(
         self,
         text: str,
         has_image: bool,
         is_tomkk: bool,
+        events: Optional[list] = None,
     ) -> tuple[int, str]:
         content = (text or "").strip().lower()
         if not content and not has_image:
@@ -737,33 +790,75 @@ class SassySisterBot(commands.Bot):
         polite_hit = any(k in content for k in ["请", "麻烦", "可以吗", "劳驾", "拜托"])
         constructive_hit = any(k in content for k in ["参数", "报错", "节点", "工作流", "怎么", "如何", "帮我看", "建议"])
 
-        delta = 0
-        reasons: list[str] = []
+        tag_deltas: list[tuple[str, int]] = []
         if insult_hit:
-            delta -= 10
-            reasons.append("insult")
+            tag_deltas.append(("insult", -10))
         if rude_hit:
-            delta -= 4
-            reasons.append("rude")
+            tag_deltas.append(("rude", -4))
         if thanks_hit:
-            delta += 3
-            reasons.append("thanks")
+            tag_deltas.append(("thanks", 3))
         if polite_hit:
-            delta += 2
-            reasons.append("polite")
+            tag_deltas.append(("polite", 2))
         if constructive_hit:
-            delta += 1
-            reasons.append("constructive")
+            tag_deltas.append(("constructive", 1))
         if has_image and not insult_hit:
-            delta += 1
-            reasons.append("shared_image")
+            tag_deltas.append(("shared_image", 1))
 
-        if is_tomkk and delta < 0:
-            delta = int(delta / 2)
-            reasons.append("tomkk_soften_penalty")
+        if is_tomkk and any(delta < 0 for _, delta in tag_deltas):
+            tag_deltas = [
+                (tag, int(delta / 2) if delta < 0 else delta)
+                for tag, delta in tag_deltas
+            ]
+            tag_deltas.append(("tomkk_soften_penalty", 0))
 
+        negative_delta = sum(delta for _, delta in tag_deltas if delta < 0)
+        positive_tags = [(tag, delta) for tag, delta in tag_deltas if delta > 0]
+
+        if not positive_tags:
+            delta = max(-12, min(8, negative_delta))
+            reasons = [tag for tag, value in tag_deltas if value != 0 or tag == "tomkk_soften_penalty"]
+            return delta, ",".join(reasons) if reasons else "neutral"
+
+        now = datetime.now(timezone.utc)
+        event_history = list(events or [])
+        blocked_tags: list[str] = []
+        applied_positive: list[tuple[str, int]] = []
+
+        last_positive_at = self._favor_last_positive_at(event_history)
+        if last_positive_at and (now - last_positive_at).total_seconds() < FAVOR_POSITIVE_MIN_INTERVAL:
+            blocked_tags.append("spam_interval")
+        else:
+            for tag, value in positive_tags:
+                if self._favor_tag_on_cooldown(event_history, tag, now):
+                    blocked_tags.append(f"cooldown:{tag}")
+                    continue
+                applied_positive.append((tag, value))
+
+        positive_delta = sum(value for _, value in applied_positive)
+        if positive_delta > 0:
+            gained_today = self._favor_positive_gain_today(event_history)
+            remaining = FAVOR_DAILY_GAIN_CAP - gained_today
+            if remaining <= 0:
+                positive_delta = 0
+                blocked_tags.append("daily_cap")
+            elif positive_delta > remaining:
+                positive_delta = remaining
+                blocked_tags.append("daily_trim")
+
+        delta = negative_delta + positive_delta
         delta = max(-12, min(8, delta))
-        return delta, ",".join(reasons) if reasons else "neutral"
+
+        reasons = [tag for tag, value in tag_deltas if value < 0]
+        reasons.extend(tag for tag, _ in applied_positive)
+        if is_tomkk and "tomkk_soften_penalty" not in reasons and any(
+            tag in ("insult", "rude") for tag, value in tag_deltas if value < 0
+        ):
+            reasons.append("tomkk_soften_penalty")
+        if blocked_tags:
+            reasons.extend(blocked_tags)
+        if not reasons:
+            reasons = ["neutral"]
+        return delta, ",".join(reasons)
 
     def _image_reply_hint(self) -> str:
         return (
@@ -966,6 +1061,7 @@ class SassySisterBot(commands.Bot):
                         user_prompt,
                         bool(image_path),
                         self._is_tomkk(message.author),
+                        favor_state.get("events", []),
                     )
                     favor_after = self._clamp_favor(current_favor + delta)
                     await data_manager.apply_favor_delta(
