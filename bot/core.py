@@ -34,7 +34,6 @@ class SassySisterBot(commands.Bot):
         # --- 机器人意图跟初始化 ---
         intents = discord.Intents.default()
         intents.message_content = True
-        intents.members = True  # 开启成员意图，为了迎接新人呀
         
         # 直接把代理 URL 交给 discord.py 来处理
         super().__init__(command_prefix="!", intents=intents, proxy=proxy_url, **options)
@@ -220,37 +219,6 @@ class SassySisterBot(commands.Bot):
         print(f"[璐瑶] 开关切换 | {name} → {state} | 操作者: {operator} ({operator.id})")
         self._print_runtime_status()
 
-    def _generate_welcome_message(self, member: discord.Member) -> str:
-        """生成欢迎新成员的介绍信息。"""
-        return f"""{member.mention}，进来了。
-
----
-
-**👨‍🎨 画师：白衣胜雪**
-画画频道里用 `/绘图`；`/设置`、`/workflow` 调风格。每次消耗「画卷」。
-
----
-
-**🐶 小哈**
-我的狗。灵感不够的时候，找它。
-- 回复一张图 + `反推`
-- 说 `画 <想法>`，它帮你凑提示词
-- `@小哈` 也能聊
-
----
-
-有事 @我。"""
-
-    async def on_member_join(self, member):
-        """当有新的小可爱加入我们的“画室”时……"""
-        if config.WELCOME_CHANNEL_IDS:
-            channel_ids = [int(cid.strip()) for cid in config.WELCOME_CHANNEL_IDS.split(',')]
-            for channel_id in channel_ids:
-                channel = self.get_channel(channel_id)
-                if channel:
-                    welcome_message = self._generate_welcome_message(member)
-                    await channel.send(welcome_message)
-
     async def _handle_artwork_message(self, message: discord.Message):
         """处理来自画图机器人的消息，无论是新建的还是编辑过的。"""
         # 如果是ID为 1444895127590928424 的机器人在指定频道发的画图结果
@@ -422,16 +390,6 @@ class SassySisterBot(commands.Bot):
         # --- 处理用户发的消息 ---
         # 3. 管理员指令检查：拥有最高优先权，不受频道限制
         if self._is_admin(message.author):
-            if message.content.startswith("!发送介绍"):
-                # 优先选择被@的第一个人，如果没有，就选择发消息的管理员自己
-                target_member = message.mentions[0] if message.mentions else message.author
-                welcome_message = self._generate_welcome_message(target_member)
-                await message.channel.send(welcome_message)
-                try:
-                    await message.delete() # 删除指令消息，保持频道整洁
-                except discord.Forbidden:
-                    print(f"没权限删除指令消息: {message.id}")
-                return
             if message.content == "赶紧睡吧":
                 self.proactive_chat_enabled = False
                 await data_manager.set_setting("proactive_chat_enabled", False)

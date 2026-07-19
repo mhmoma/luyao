@@ -12,9 +12,6 @@ OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
 
-# Welcome message channel IDs
-WELCOME_CHANNEL_IDS = os.getenv("WELCOME_CHANNEL_IDS")
-
 # Allowed channel IDs for the bot to speak in
 ALLOWED_CHANNEL_IDS = os.getenv("ALLOWED_CHANNEL_IDS")
 

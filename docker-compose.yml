@@ -47,11 +47,6 @@ services:
       # - HTTP_PROXY=http://your-proxy-address:port
       # - HTTPS_PROXY=https://your-proxy-address:port
 
-      # --- Welcome Message (Optional) ---
-      # Channel IDs where the bot sends a welcome message.
-      # Separate multiple IDs with commas.
-      # - WELCOME_CHANNEL_IDS=
-
       # --- Auto-Cleanup (Optional) ---
       # Channel IDs where the bot will automatically delete messages.
       # Separate multiple IDs with commas.
